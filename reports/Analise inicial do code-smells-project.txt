@@ -1,0 +1,184 @@
+# Análise Manual — code-smells-project
+
+## Informações Gerais
+
+* Linguagem: Python
+* Framework: Flask
+* Banco de Dados: SQLite
+* Arquitetura Atual: Monolítica
+* Domínio: E-commerce
+
+## Resumo
+
+O projeto concentra praticamente toda a lógica da aplicação em poucos arquivos (`app.py`, `controllers.py`, `models.py` e `database.py`), apresentando graves problemas de segurança, separação de responsabilidades e manutenção.
+
+---
+
+## Findings
+
+### [CRITICAL] Credenciais Hardcoded
+
+Arquivo: app.py
+
+Problema:
+SECRET_KEY armazenada diretamente no código-fonte.
+
+Impacto:
+Comprometimento de sessões e exposição de credenciais.
+
+Recomendação:
+Mover para variáveis de ambiente.
+
+---
+
+### [CRITICAL] Execução Arbitrária de SQL
+
+Arquivo: app.py
+
+Endpoint:
+POST /admin/query
+
+Problema:
+Executa qualquer SQL recebido do usuário.
+
+Impacto:
+Leitura, alteração ou exclusão completa do banco.
+
+Recomendação:
+Remover endpoint ou restringir severamente seu uso.
+
+---
+
+### [CRITICAL] SQL Injection
+
+Arquivo: models.py
+
+Problema:
+Diversas consultas SQL são montadas por concatenação de strings.
+
+Impacto:
+Acesso indevido a dados e comprometimento total da aplicação.
+
+Recomendação:
+Utilizar queries parametrizadas.
+
+---
+
+### [HIGH] Senhas em Texto Puro
+
+Arquivos:
+database.py
+models.py
+
+Problema:
+Senhas armazenadas e comparadas sem hash.
+
+Impacto:
+Exposição total das credenciais em caso de vazamento.
+
+Recomendação:
+Utilizar bcrypt ou argon2.
+
+---
+
+### [HIGH] Endpoint Administrativo Sem Autenticação
+
+Arquivo: app.py
+
+Endpoint:
+POST /admin/reset-db
+
+Problema:
+Qualquer usuário pode apagar todos os dados.
+
+Impacto:
+Perda total das informações.
+
+Recomendação:
+Implementar autenticação e autorização.
+
+---
+
+### [HIGH] God Class / God Module
+
+Arquivo: models.py
+
+Problema:
+Um único módulo concentra:
+
+* acesso a banco
+* autenticação
+* pedidos
+* usuários
+* produtos
+* relatórios
+
+Impacto:
+Alto acoplamento e baixa testabilidade.
+
+Recomendação:
+Separar por domínio e responsabilidade.
+
+---
+
+### [MEDIUM] Regras de Negócio em Controllers
+
+Arquivo: controllers.py
+
+Problema:
+Validações e regras de domínio executadas diretamente nas rotas.
+
+Impacto:
+Dificulta reutilização e testes.
+
+Recomendação:
+Criar camada de serviços.
+
+---
+
+### [MEDIUM] N+1 Queries
+
+Arquivo: models.py
+
+Problema:
+Consultas executadas dentro de loops.
+
+Impacto:
+Problemas de performance.
+
+Recomendação:
+Utilizar JOINs e carregamento otimizado.
+
+---
+
+### [LOW] Logging com print()
+
+Problema:
+Uso extensivo de print para logs.
+
+Recomendação:
+Substituir por logging estruturado.
+
+---
+
+### [LOW] Strings Mágicas
+
+Problema:
+Valores fixos repetidos em vários pontos.
+
+Recomendação:
+Criar constantes ou enums.
+
+---
+
+## Resumo Final
+
+CRITICAL: 3
+
+HIGH: 3
+
+MEDIUM: 2
+
+LOW: 2
+
+Total: 10 findings

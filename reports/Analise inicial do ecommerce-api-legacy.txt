@@ -1,0 +1,170 @@
+# Análise Manual — ecommerce-api-legacy
+
+## Informações Gerais
+
+* Linguagem: JavaScript
+* Framework: Express
+* Banco de Dados: SQLite
+* Arquitetura Atual: Monolítica
+* Domínio: LMS / Plataforma de Cursos
+
+## Resumo
+
+O projeto apresenta forte acoplamento dentro da classe AppManager, mistura responsabilidades de pagamento, usuários, cursos, auditoria e persistência, além de problemas relevantes de segurança.
+
+---
+
+## Findings
+
+### [CRITICAL] Credenciais Hardcoded
+
+Arquivo: utils.js
+
+Problema:
+Configurações sensíveis e chaves da aplicação armazenadas diretamente no código.
+
+Impacto:
+Exposição de segredos.
+
+Recomendação:
+Variáveis de ambiente.
+
+---
+
+### [CRITICAL] Criptografia Insegura
+
+Arquivos:
+utils.js
+AppManager.js
+
+Problema:
+Uso da função badCrypto() para armazenamento de senhas.
+
+Impacto:
+Comprometimento de credenciais.
+
+Recomendação:
+bcrypt.
+
+---
+
+### [HIGH] God Class
+
+Arquivo: AppManager.js
+
+Problema:
+A mesma classe gerencia:
+
+* usuários
+* cursos
+* matrículas
+* pagamentos
+* auditoria
+* banco de dados
+* rotas
+
+Impacto:
+Baixa manutenibilidade.
+
+Recomendação:
+Separação em Controllers, Services e Models.
+
+---
+
+### [HIGH] Lógica de Negócio Dentro das Rotas
+
+Arquivo: AppManager.js
+
+Problema:
+Checkout, matrícula, pagamento e auditoria são executados diretamente nos handlers HTTP.
+
+Impacto:
+Violação de MVC e SOLID.
+
+Recomendação:
+Extrair para Services.
+
+---
+
+### [HIGH] Dados Sensíveis em Logs
+
+Arquivo: AppManager.js
+
+Problema:
+Cartões e informações de pagamento aparecem em logs.
+
+Impacto:
+Risco de vazamento de dados.
+
+Recomendação:
+Mascarar ou remover informações sensíveis.
+
+---
+
+### [MEDIUM] Banco em Memória
+
+Arquivo: AppManager.js
+
+Problema:
+Uso de SQLite em memória.
+
+Impacto:
+Perda completa dos dados após reinicialização.
+
+Recomendação:
+Persistência adequada.
+
+---
+
+### [MEDIUM] Ausência de Camada de Serviços
+
+Problema:
+Toda regra de negócio está acoplada às rotas.
+
+Impacto:
+Baixa reutilização.
+
+Recomendação:
+Criar Services.
+
+---
+
+### [LOW] Convenções Inconsistentes
+
+Problema:
+Nomes abreviados como:
+
+* usr
+* eml
+* pwd
+* c_id
+
+Impacto:
+Reduz legibilidade.
+
+Recomendação:
+Padronizar nomenclatura.
+
+---
+
+### [LOW] Logging Não Estruturado
+
+Problema:
+Uso extensivo de console.log.
+
+Recomendação:
+Framework de logging.
+
+---
+
+## Resumo Final
+
+CRITICAL: 2
+
+HIGH: 3
+
+MEDIUM: 2
+
+LOW: 2
+
+Total: 9 findings

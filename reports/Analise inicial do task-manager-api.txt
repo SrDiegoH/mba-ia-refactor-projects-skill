@@ -1,0 +1,163 @@
+# Análise Manual — task-manager-api
+
+## Informações Gerais
+
+* Linguagem: Python
+* Framework: Flask
+* Banco de Dados: SQLAlchemy
+* Arquitetura Atual: Parcialmente Organizada
+* Domínio: Task Manager
+
+## Resumo
+
+O projeto apresenta uma estrutura melhor que os demais, já contendo diretórios de models, routes e services. Entretanto ainda possui forte concentração de regras de negócio nas rotas e diversos problemas de qualidade arquitetural.
+
+---
+
+## Findings
+
+### [HIGH] Regras de Negócio nas Rotas
+
+Arquivo: routes/task_routes.py
+
+Problema:
+As rotas realizam:
+
+* validações
+* cálculos
+* verificações de status
+* regras de atraso
+
+Impacto:
+Violação de responsabilidades.
+
+Recomendação:
+Mover para Services.
+
+---
+
+### [HIGH] N+1 Queries
+
+Arquivo: routes/task_routes.py
+
+Problema:
+Para cada task são executadas consultas adicionais para usuário e categoria.
+
+Impacto:
+Degradação de performance.
+
+Recomendação:
+Utilizar eager loading ou joins.
+
+---
+
+### [MEDIUM] Tratamento Genérico de Exceções
+
+Arquivo: routes/task_routes.py
+
+Problema:
+
+```python
+except:
+```
+
+Impacto:
+Oculta erros reais.
+
+Recomendação:
+Capturar exceções específicas.
+
+---
+
+### [MEDIUM] Duplicação de Regras de Overdue
+
+Arquivo: routes/task_routes.py
+
+Problema:
+A lógica de overdue aparece repetida em múltiplos endpoints.
+
+Impacto:
+Violação do princípio DRY.
+
+Recomendação:
+Centralizar em Service ou Model.
+
+---
+
+### [MEDIUM] Serialização Manual
+
+Arquivo: routes/task_routes.py
+
+Problema:
+Montagem manual de dicionários para resposta.
+
+Impacto:
+Código repetitivo.
+
+Recomendação:
+DTOs ou serializers.
+
+---
+
+### [LOW] Imports Não Utilizados
+
+Arquivo: routes/task_routes.py
+
+Problema:
+Presença de imports aparentemente desnecessários.
+
+Impacto:
+Ruído no código.
+
+Recomendação:
+Remover dependências não utilizadas.
+
+---
+
+### [LOW] Strings Mágicas
+
+Arquivo: routes/task_routes.py
+
+Problema:
+Status fixos espalhados:
+
+* pending
+* in_progress
+* done
+* cancelled
+
+Impacto:
+Manutenção mais difícil.
+
+Recomendação:
+Enums ou constantes.
+
+---
+
+### [LOW] Validações Repetidas
+
+Arquivo: routes/task_routes.py
+
+Problema:
+Validações distribuídas em múltiplos endpoints.
+
+Impacto:
+Duplicação de código.
+
+Recomendação:
+Centralizar validações.
+
+---
+
+## Resumo Final
+
+HIGH: 2
+
+MEDIUM: 3
+
+LOW: 3
+
+Total: 8 findings
+
+Observação:
+Este é o projeto mais próximo de uma arquitetura organizada. A refatoração necessária é significativamente menor que nos outros dois projetos.
