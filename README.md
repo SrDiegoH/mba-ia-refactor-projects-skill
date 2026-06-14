@@ -454,7 +454,7 @@ A skill deve atingir os seguintes mínimos em **todos os 3 projetos**:
 
 ## Análise Manual
 
-As analises iniciais dos projetos se encontram em `mba-ia-refactor-projects-skill\reports\analise-inicial`
+As análises iniciais dos projetos se encontram em `mba-ia-refactor-projects-skill\reports\analise-inicial`
 
 ## Construção da Skill
 
