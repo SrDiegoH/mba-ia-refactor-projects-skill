@@ -521,7 +521,375 @@ Também foi necessário garantir que a refatoração preservasse o comportamento
 
 ## Resultados
 
+### Resumo dos Relatórios de Auditoria
 
+| Projeto | Stack | CRITICAL | HIGH | MEDIUM | LOW | Total | Resolvidos | Status |
+|---------|-------|:--------:|:----:|:------:|:---:|:-----:|:----------:|:------:|
+| code-smells-project | Python/Flask | 5 | 5 | 4 | 3 | **17** | 17 (100%) | ✅ PASS |
+| ecommerce-api-legacy | Node.js/Express | 3 | 5 | 5 | 2 | **15** | 11 (73%) | ✅ PASS |
+| task-manager-api | Python/Flask | 2 | 5 | 5 | 3 | **15** | 13 (87%) | ✅ PASS |
+
+Findings não resolvidos são os que estão **fora do escopo MVC** — autenticação real (JWT), logging estruturado (winston/pino) e validação de cartão via gateway externo. Todos os contratos de API foram preservados.
+
+---
+
+### Comparação Antes/Depois
+
+#### Projeto 1 — code-smells-project (Python/Flask E-commerce)
+
+**Antes** — `PARTIAL_MVC`: 4 arquivos (~490 LOC), SQL embutido nas funções, sem separação real de camadas
+
+```
+code-smells-project/
+├── app.py           (registro de rotas via add_url_rule)
+├── controllers.py   (lógica de negócio + SQL + print())
+├── models.py        (SQL + regras de desconto + N+1 queries)
+└── database.py
+```
+
+**Depois** — `MVC` completo: config/, models/, services/, controllers/, routes/ com Flask Blueprints
+
+```
+code-smells-project/
+├── app.py
+├── config/
+│   ├── settings.py     (SECRET_KEY, DEBUG, DATABASE_PATH via os.environ)
+│   └── database.py     (singleton de conexão SQLite)
+├── models/
+│   ├── product.py      (queries parametrizadas — sem SQL Injection)
+│   ├── user.py         (campo senha excluído por padrão)
+│   ├── order.py        (JOIN único — elimina N+1)
+│   └── health.py
+├── services/
+│   ├── product_service.py
+│   ├── user_service.py
+│   ├── auth_service.py
+│   ├── order_service.py    (transação explícita com rollback)
+│   └── report_service.py   (constantes LIMIAR_* nomeadas)
+├── controllers/
+│   ├── product_controller.py
+│   ├── user_controller.py
+│   ├── auth_controller.py
+│   ├── order_controller.py
+│   └── system_controller.py
+└── routes/
+    ├── product_routes.py
+    ├── user_routes.py
+    ├── order_routes.py
+    ├── auth_routes.py
+    └── system_routes.py
+```
+
+---
+
+#### Projeto 2 — ecommerce-api-legacy (Node.js/Express LMS)
+
+**Antes** — `MONOLITHIC`: 3 arquivos (~182 LOC), AppManager concentrava DB + rotas + lógica
+
+```
+ecommerce-api-legacy/src/
+├── app.js          (apenas require + listen)
+├── AppManager.js   (God Class: initDb + setupRoutes + lógica de checkout + relatório)
+└── utils.js        (credenciais hardcoded + globalCache sem TTL)
+```
+
+**Depois** — `MVC` completo: src/ reorganizado em 6 camadas
+
+```
+ecommerce-api-legacy/src/
+├── app.js
+├── config/
+│   └── database.js     (Promise wrappers para sqlite3 + initDb() assíncrono)
+├── models/
+│   ├── user.model.js
+│   ├── course.model.js
+│   ├── enrollment.model.js
+│   ├── payment.model.js
+│   └── auditLog.model.js
+├── services/
+│   ├── checkout.service.js   (transação atômica com async/await)
+│   ├── financial.service.js  (JOIN único — elimina N+1)
+│   └── user.service.js       (cascade delete em transação)
+├── controllers/
+│   ├── checkout.controller.js
+│   ├── financial.controller.js
+│   └── user.controller.js
+├── routes/
+│   ├── checkout.routes.js
+│   ├── financial.routes.js
+│   └── user.routes.js
+└── utils/
+    └── crypto.js       (bcrypt substituindo badCrypto())
+```
+
+---
+
+#### Projeto 3 — task-manager-api (Python/Flask Task Manager)
+
+**Antes** — `PARTIAL_MVC`: models/, services/ e utils/ existiam, mas routes/ concentrava toda a lógica (~736 LOC) e não havia config/ nem controllers/
+
+```
+task-manager-api/
+├── app.py
+├── database.py
+├── models/   (user.py, task.py, category.py)
+├── routes/   ← 736 LOC com lógica de negócio embutida, MD5, credenciais hardcoded
+├── services/ (existia mas incompleto)
+└── utils/    (helpers com código morto não utilizado)
+```
+
+**Depois** — `MVC` completo: config/ e controllers/ adicionados; routes/ reduzidas de **736 → 35 LOC**
+
+```
+task-manager-api/
+├── app.py              (34 LOC — apenas init + blueprints)
+├── database.py
+├── config/
+│   └── settings.py     (os.environ — sem hardcoded)
+├── models/
+│   ├── user.py         (werkzeug.security — sem MD5)
+│   ├── task.py
+│   └── category.py
+├── controllers/
+│   ├── user_controller.py    (70 LOC)
+│   ├── task_controller.py    (61 LOC)
+│   └── report_controller.py  (54 LOC)
+├── routes/
+│   ├── user_routes.py        (12 LOC)
+│   ├── task_routes.py        (12 LOC)
+│   └── report_routes.py      (11 LOC)   ← total: 35 LOC
+├── services/
+│   ├── user_service.py       (joinedload, validações centralizadas)
+│   ├── task_service.py       (is_overdue() único, N+1 eliminado)
+│   ├── report_service.py
+│   └── notification_service.py
+└── utils/
+    └── helpers.py      (44 LOC — dead code removido)
+```
+
+---
+
+### Checklists de Validação
+
+#### Projeto 1 — code-smells-project (Python/Flask)
+
+```markdown
+## Checklist de Validação
+
+### Fase 1 — Análise
+- [x] Linguagem detectada corretamente       → Python 3.x
+- [x] Framework detectado corretamente       → Flask 3.1.1
+- [x] Domínio da aplicação descrito          → E-COMMERCE (produtos, pedidos, usuários)
+- [x] Número de arquivos analisados          → 4 arquivos (~490 LOC)
+
+### Fase 2 — Auditoria
+- [x] Relatório segue o template definido
+- [x] Cada finding tem arquivo e linhas exatos
+- [x] Findings ordenados por severidade (CRITICAL → LOW)
+- [x] Mínimo de 5 findings identificados     → 17 findings (5 CRITICAL)
+- [x] Detecção de APIs deprecated            → N/A (nenhuma deprecated detectada)
+- [x] Skill pausou e pediu confirmação antes da Fase 3
+
+### Fase 3 — Refatoração
+- [x] Estrutura de diretórios segue padrão MVC
+- [x] Configuração extraída para config/settings.py
+- [x] Models criados (product, user, order, health)
+- [x] Routes separadas com Flask Blueprints por domínio
+- [x] Controllers concentram orquestração HTTP
+- [x] Error handling centralizado com try/except + rollback
+- [x] Entry point claro (app.py — apenas init + blueprints)
+- [x] Aplicação inicia sem erros
+- [x] Endpoints originais respondem corretamente (21/21 verificações)
+```
+
+#### Projeto 2 — ecommerce-api-legacy (Node.js/Express)
+
+```markdown
+## Checklist de Validação
+
+### Fase 1 — Análise
+- [x] Linguagem detectada corretamente       → JavaScript (Node.js)
+- [x] Framework detectado corretamente       → Express.js 4.18.2
+- [x] Domínio da aplicação descrito          → LMS/E-commerce (checkout de cursos)
+- [x] Número de arquivos analisados          → 3 arquivos (~182 LOC)
+
+### Fase 2 — Auditoria
+- [x] Relatório segue o template definido
+- [x] Cada finding tem arquivo e linhas exatos
+- [x] Findings ordenados por severidade (CRITICAL → LOW)
+- [x] Mínimo de 5 findings identificados     → 15 findings (3 CRITICAL)
+- [x] Detecção de APIs deprecated            → ✅ sqlite3 callback API detectada
+- [x] Skill pausou e pediu confirmação antes da Fase 3
+
+### Fase 3 — Refatoração
+- [x] Estrutura de diretórios segue padrão MVC
+- [x] Configuração extraída para config/database.js + .env
+- [x] Models criados (user, course, enrollment, payment, auditLog)
+- [x] Routes separadas por domínio (checkout, financial, user)
+- [x] Controllers concentram orquestração HTTP
+- [x] Error handling centralizado com try/catch + status codes semânticos
+- [x] Entry point claro (src/app.js)
+- [x] Aplicação inicia sem erros
+- [x] Endpoints originais respondem corretamente (3/3 endpoints preservados)
+```
+
+#### Projeto 3 — task-manager-api (Python/Flask)
+
+```markdown
+## Checklist de Validação
+
+### Fase 1 — Análise
+- [x] Linguagem detectada corretamente       → Python 3
+- [x] Framework detectado corretamente       → Flask 3.0.0
+- [x] Domínio da aplicação descrito          → TASK MANAGEMENT (tasks, users, categories)
+- [x] Número de arquivos analisados          → 10 arquivos Python (~1.059 LOC)
+
+### Fase 2 — Auditoria
+- [x] Relatório segue o template definido
+- [x] Cada finding tem arquivo e linhas exatos
+- [x] Findings ordenados por severidade (CRITICAL → LOW)
+- [x] Mínimo de 5 findings identificados     → 15 findings (2 CRITICAL)
+- [x] Detecção de APIs deprecated            → ✅ SQLAlchemy 2.0 + Python 3.12
+- [x] Skill pausou e pediu confirmação antes da Fase 3
+
+### Fase 3 — Refatoração
+- [x] Estrutura de diretórios segue padrão MVC
+- [x] Configuração extraída para config/settings.py
+- [x] Models mantidos e melhorados (werkzeug.security, sem MD5)
+- [x] Routes reduzidas para registro declarativo (35 LOC total)
+- [x] Controllers criados (user, task, report)
+- [x] Error handling centralizado nos services com rollback
+- [x] Entry point claro (app.py — 34 LOC)
+- [x] Aplicação inicia sem erros
+- [x] Endpoints originais respondem corretamente (22/22 endpoints)
+```
+
+---
+
+### Aplicações Rodando Após Refatoração
+
+#### Projeto 1 — code-smells-project
+
+```
+$ python -c "from app import app; print('Boot OK')"
+Boot OK
+
+$ flask run
+ * Running on http://127.0.0.1:5000
+
+GET /health
+→ 200 {"counts": {"pedidos": 1, "produtos": 10, "usuarios": 4},
+        "database": "connected", "status": "ok", "versao": "1.0.0"}
+
+GET /
+→ 200 {"endpoints": {"health": "/health", "login": "/login",
+        "pedidos": "/pedidos", "produtos": "/produtos",
+        "relatorios": "/relatorios/vendas", "usuarios": "/usuarios"},
+        "mensagem": "Bem-vindo à API da Loja", "versao": "1.0.0"}
+
+GET /produtos
+→ 200 [lista com 10 produtos — sem SQL Injection, sem campo senha exposto]
+
+GET /usuarios
+→ 200 [lista com 4 usuários — campo senha ausente da resposta]
+```
+
+#### Projeto 2 — ecommerce-api-legacy
+
+```
+$ node src/app.js
+Frankenstein LMS rodando na porta 3000...
+
+GET /api/admin/financial-report
+→ 200 [{"course":"Clean Architecture","revenue":997,
+         "students":[{"student":"Leonan","paid":997}]},
+        {"course":"Docker","revenue":0,"students":[]}]
+
+POST /api/checkout (cartão válido — número começa com 4)
+→ 200 {"msg":"Sucesso","enrollment_id":2}
+
+POST /api/checkout (cartão inválido — número começa com 5)
+→ 400 "Pagamento recusado"
+
+DELETE /api/users/1
+→ 200 "Usuário deletado com sucesso."
+
+GET /api/admin/financial-report (após delete — cascade validado)
+→ 200 [{"course":"Clean Architecture","revenue":997,...}]
+```
+
+#### Projeto 3 — task-manager-api
+
+```
+$ python seed.py
+Seed concluído com sucesso!
+  3 usuários
+  4 categorias
+  10 tasks
+
+$ python app.py
+ * Running on http://0.0.0.0:5000
+
+GET /health
+→ 200 {"status": "ok", "timestamp": "2026-06-20 22:20:35.452530"}
+
+GET /
+→ 200 {"message": "Task Manager API", "version": "1.0"}
+
+GET /tasks
+→ 200 [10 tasks com campos user_name e category_name via joinedload — sem N+1 queries]
+
+GET /users
+→ 200 [3 usuários — campo password AUSENTE na resposta]
+
+GET /tasks/stats
+→ 200 {"cancelled": 1, "completion_rate": 10.0, "done": 1,
+        "in_progress": 2, "overdue": 2, "pending": 6, "total": 10}
+
+GET /categories
+→ 200 [4 categorias com task_count]
+
+GET /tasks/search?status=pending
+→ 200 [6 tasks com status pending]
+
+GET /reports/summary
+→ 200 {"overview": {"total_tasks": 10, ...}, "tasks_by_status": {...},
+        "tasks_by_priority": {...}, "user_productivity": [...]}
+
+POST /login  {"email": "joao@email.com", "password": "1234"}
+→ 200 {"message": "Login realizado com sucesso",
+        "user": {"name": "João Silva", "role": "admin"},
+        "token": "fake-jwt-token-1"}
+
+POST /login  {"email": "joao@email.com", "password": "errada"}
+→ 401 {"error": "Credenciais inválidas"}
+
+GET /tasks/9999
+→ 404 {"error": "Task não encontrada"}
+```
+
+---
+
+### Observações sobre a Skill em Stacks Diferentes
+
+**Detecção de stack funcionou nos 3 projetos sem ajuste manual.** A heurística baseada em extensões de arquivo + presença de `package.json` (Node.js) vs `requirements.txt` (Python) foi suficiente para discriminar corretamente.
+
+**Estratégia de migração variou por projeto:**
+
+| Projeto | Arquitetura inicial | Estratégia adotada |
+|---------|---------------------|--------------------|
+| code-smells-project | PARTIAL_MVC (4 arquivos) | Reescrita por camada com SQL parametrizado |
+| ecommerce-api-legacy | MONOLITHIC (God Class) | Full Rewrite — AppManager dissolvido em 6 camadas |
+| task-manager-api | PARTIAL_MVC (organização parcial) | Incremental — código movido, não reescrito |
+
+**Ponto mais sensível: projetos com organização parcial (Projeto 3).** A skill detectou corretamente que modelos e serviços já existiam e adotou estratégia incremental — adicionando `config/` e `controllers/`, e emagrecendo `routes/` — em vez de reescrever o que já estava correto. Isso exigiu que os arquivos de referência distinguissem explicitamente entre "Full Rewrite" e "Incremental".
+
+**Detecção de APIs deprecated variou por stack:**
+- Python (Projeto 1): nenhuma deprecated detectada (Flask 3.1.1 + sqlite3 puros)
+- Node.js (Projeto 2): sqlite3 callback API detectada e encapsulada em Promise wrappers
+- Python (Projeto 3): SQLAlchemy 2.0 (`Model.query.get` → `db.session.get`) + Python 3.12 (`datetime.utcnow`)
+
+**O ponto de confirmação da Fase 2 foi o mais importante.** Em todos os 3 projetos, o relatório de auditoria foi apresentado antes de qualquer modificação, permitindo revisar os findings e decidir sobre os que estavam fora do escopo MVC (autenticação, gateway de pagamento, logging estruturado).
 
 ## Como Executar
 
