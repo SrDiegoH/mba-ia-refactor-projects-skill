@@ -458,7 +458,66 @@ As análises iniciais dos projetos se encontram em `mba-ia-refactor-projects-ski
 
 ## Construção da Skill
 
+### Decisões de Design
 
+A skill foi construída seguindo um fluxo em quatro fases:
+
+1. Análise do projeto
+2. Auditoria arquitetural
+3. Refatoração
+4. Validação
+
+Essa divisão foi adotada para garantir que o projeto fosse compreendido antes de qualquer modificação.
+
+Outra decisão importante foi manter o `SKILL.md` apenas como orquestrador do processo, enquanto as regras e conhecimentos específicos foram organizados em arquivos de referência separados. Isso facilita manutenção e reduz ambiguidades.
+
+---
+
+### Anti-Patterns Incluídos
+
+Foram selecionados anti-patterns comuns em aplicações legadas e fáceis de identificar automaticamente:
+
+* God Class
+* God Method
+* Hardcoded Credentials
+* Business Logic in Routes
+* Business Logic in Controllers
+* Tight Coupling
+* Global Mutable State
+* Duplicated Logic
+* Missing Validation
+* Deprecated APIs
+
+Esses problemas foram escolhidos por serem frequentes e por impactarem diretamente a organização MVC e a manutenibilidade do sistema.
+
+---
+
+### Como a Skill Foi Tornada Agnóstica de Tecnologia
+
+A skill foi projetada com foco em conceitos arquiteturais, não em frameworks específicos.
+
+As regras são baseadas em responsabilidades de:
+
+* Rotas
+* Controladores
+* Modelos
+* Fluxo de dependências
+
+A detecção da stack foi isolada em documentos específicos, permitindo que a mesma lógica funcione em diferentes tecnologias.
+
+Os exemplos utilizados contemplam tanto Python/Flask quanto Node.js/Express, mas as regras podem ser aplicadas a outros frameworks semelhantes.
+
+---
+
+### Desafios Encontrados
+
+O principal desafio foi equilibrar generalização e precisão.
+
+Regras muito genéricas podem gerar falsos positivos, enquanto regras muito específicas limitam a reutilização da skill.
+
+Outro desafio foi evitar over-engineering. As primeiras versões tendiam a introduzir camadas extras, como Services obrigatórios. Após revisar os requisitos do desafio, a arquitetura alvo foi simplificada para MVC, mantendo a camada de Services como opcional.
+
+Também foi necessário garantir que a refatoração preservasse o comportamento original da aplicação. Para isso, a skill realiza um inventário de endpoints antes das alterações e utiliza essas informações durante a validação final.
 
 ## Resultados
 
