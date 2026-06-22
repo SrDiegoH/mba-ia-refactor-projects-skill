@@ -426,3 +426,204 @@ Applicable Findings:
 ```text
 AP203
 ```
+
+---
+
+## RP006 - Secure Password Hashing
+
+Use when:
+
+* passwords are stored as plaintext
+* passwords are hashed with MD5 or SHA1 (no salt)
+* passwords are encoded with Base64 (reversible — not a hash)
+* any custom "encryption" loop that does not use a proper KDF
+
+Before (Python — MD5 without salt):
+
+```python
+import hashlib
+
+def hash_password(password):
+    return hashlib.md5(password.encode()).hexdigest()
+
+def check_password(stored, provided):
+    return stored == hashlib.md5(provided.encode()).hexdigest()
+```
+
+After (Python — werkzeug PBKDF2):
+
+```python
+from werkzeug.security import generate_password_hash, check_password_hash
+
+def hash_password(password):
+    return generate_password_hash(password)
+
+def verify_password(stored_hash, provided):
+    return check_password_hash(stored_hash, provided)
+```
+
+Before (Node.js — Base64 accumulation loop):
+
+```javascript
+function badCrypto(password) {
+    let result = password;
+    for (let i = 0; i < 10000; i++) {
+        result = Buffer.from(result).toString('base64');
+    }
+    return result.slice(0, 32);
+}
+```
+
+After (Node.js — bcrypt):
+
+```javascript
+const bcrypt = require('bcrypt');
+
+async function hashPassword(password) {
+    return bcrypt.hash(password, 12);
+}
+
+async function verifyPassword(plaintext, hash) {
+    return bcrypt.compare(plaintext, hash);
+}
+```
+
+Applicable Findings:
+
+```text
+AP003
+AP001
+```
+
+---
+
+## RP007 - Remove or Protect Dangerous Endpoint
+
+Use when:
+
+* an endpoint executes arbitrary SQL received from the request body
+* an admin endpoint has no authentication or authorization check
+* an endpoint exposes sensitive runtime data (SECRET_KEY, DB credentials, debug info)
+* a utility/debug route is reachable without credentials in a non-development environment
+
+Before (Python — raw SQL execution endpoint without auth):
+
+```python
+@app.route("/admin/query", methods=["POST"])
+def exec_query():
+    sql = request.json.get("sql")
+    cursor = db.execute(sql)          # arbitrary SQL injection vector
+    return jsonify(cursor.fetchall())
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "secret_key": app.config["SECRET_KEY"],   # exposes secret
+        "debug": app.config["DEBUG"]
+    })
+```
+
+After (Python — endpoint removed or properly guarded):
+
+```python
+# /admin/query removed entirely — no legitimate production use case.
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})  # no sensitive data exposed
+```
+
+Before (Node.js — financial report without auth):
+
+```javascript
+app.get('/api/admin/financial-report', (req, res) => {
+    // no authentication check
+    generateReport(res);
+});
+```
+
+After (Node.js — protected with auth middleware):
+
+```javascript
+const { requireAdmin } = require('../middleware/auth');
+
+router.get('/api/admin/financial-report', requireAdmin, financialController.getReport);
+```
+
+Applicable Findings:
+
+```text
+AP001
+AP002
+AP004
+```
+
+---
+
+## RP008 - Replace Deprecated API
+
+Use when:
+
+* the codebase uses language or framework APIs that are marked deprecated in the current runtime version
+* a library function has a known secure replacement (e.g. insecure cipher constructors)
+
+Before (Python — datetime.utcnow() deprecated since 3.12):
+
+```python
+from datetime import datetime
+
+created_at = datetime.utcnow()
+```
+
+After (Python — timezone-aware):
+
+```python
+from datetime import datetime, timezone
+
+created_at = datetime.now(timezone.utc)
+```
+
+Before (Node.js — crypto.createCipher deprecated since v10):
+
+```javascript
+const cipher = crypto.createCipher('aes-256-cbc', key);
+```
+
+After (Node.js — explicit IV required):
+
+```javascript
+const iv = crypto.randomBytes(16);
+const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+```
+
+Before (Flask-SQLAlchemy — SQLALCHEMY_DATABASE_URI set directly on app.config without init_app pattern):
+
+```python
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite3'
+db = SQLAlchemy(app)   # tight coupling, deprecated pattern
+```
+
+After (Flask-SQLAlchemy — application factory with init_app):
+
+```python
+# database.py
+from flask_sqlalchemy import SQLAlchemy
+db = SQLAlchemy()
+
+# app.py
+from database import db
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(settings)
+    db.init_app(app)
+    return app
+```
+
+Applicable Findings:
+
+```text
+AP600
+AP601
+AP700
+```
