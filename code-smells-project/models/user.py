@@ -1,14 +1,11 @@
 from config.database import get_db
+from utils.db_utils import row_to_dict
+
+_USER_FIELDS = ["id", "nome", "email", "tipo", "criado_em"]
 
 
 def _row_to_dict(row, include_senha=False):
-    data = {
-        "id": row["id"],
-        "nome": row["nome"],
-        "email": row["email"],
-        "tipo": row["tipo"],
-        "criado_em": row["criado_em"]
-    }
+    data = row_to_dict(row, _USER_FIELDS)
     if include_senha:
         data["senha"] = row["senha"]
     return data

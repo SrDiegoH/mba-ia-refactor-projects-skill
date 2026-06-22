@@ -46,6 +46,8 @@ def list_user_orders(usuario_id):
 def update_order_status(pedido_id):
     try:
         dados = request.get_json()
+        if not dados:
+            return jsonify({"erro": "Dados inválidos"}), 400
         novo_status = dados.get("status", "")
         order_service.update_order_status(pedido_id, novo_status)
         return jsonify({"sucesso": True, "mensagem": "Status atualizado"}), 200

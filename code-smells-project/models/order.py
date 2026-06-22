@@ -1,4 +1,5 @@
 from config.database import get_db
+import models.product as product_model
 
 
 def _build_orders_from_rows(rows):
@@ -68,26 +69,18 @@ def create_order_item(pedido_id, produto_id, quantidade, preco_unitario):
     )
 
 
-def get_product_for_order(produto_id):
+def create_order_with_items(usuario_id, total, produtos_validos):
     db = get_db()
-    cursor = db.cursor()
-    cursor.execute(
-        "SELECT id, nome, preco, estoque FROM produtos WHERE id = ?",
-        (produto_id,)
-    )
-    row = cursor.fetchone()
-    if row:
-        return {"id": row["id"], "nome": row["nome"], "preco": row["preco"], "estoque": row["estoque"]}
-    return None
-
-
-def decrement_stock(produto_id, quantidade):
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute(
-        "UPDATE produtos SET estoque = estoque - ? WHERE id = ?",
-        (quantidade, produto_id)
-    )
+    try:
+        pedido_id = create_order(usuario_id, total)
+        for produto, quantidade in produtos_validos:
+            create_order_item(pedido_id, produto["id"], quantidade, produto["preco"])
+            product_model.decrement_stock(produto["id"], quantidade)
+        db.commit()
+        return pedido_id
+    except Exception:
+        db.rollback()
+        raise
 
 
 def update_order_status(pedido_id, novo_status):
@@ -104,20 +97,20 @@ def update_order_status(pedido_id, novo_status):
 def get_order_stats():
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT COUNT(*) FROM pedidos")
-    total = cursor.fetchone()[0]
-    cursor.execute("SELECT SUM(total) FROM pedidos")
-    faturamento = cursor.fetchone()[0] or 0
-    cursor.execute("SELECT COUNT(*) FROM pedidos WHERE status = 'pendente'")
-    pendentes = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM pedidos WHERE status = 'aprovado'")
-    aprovados = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM pedidos WHERE status = 'cancelado'")
-    cancelados = cursor.fetchone()[0]
+    cursor.execute("""
+        SELECT
+            COUNT(*) as total,
+            COALESCE(SUM(total), 0) as faturamento,
+            COALESCE(SUM(CASE WHEN status = 'pendente' THEN 1 ELSE 0 END), 0) as pendentes,
+            COALESCE(SUM(CASE WHEN status = 'aprovado' THEN 1 ELSE 0 END), 0) as aprovados,
+            COALESCE(SUM(CASE WHEN status = 'cancelado' THEN 1 ELSE 0 END), 0) as cancelados
+        FROM pedidos
+    """)
+    row = cursor.fetchone()
     return {
-        "total": total,
-        "faturamento": faturamento,
-        "pendentes": pendentes,
-        "aprovados": aprovados,
-        "cancelados": cancelados
+        "total": row["total"],
+        "faturamento": row["faturamento"],
+        "pendentes": row["pendentes"],
+        "aprovados": row["aprovados"],
+        "cancelados": row["cancelados"]
     }

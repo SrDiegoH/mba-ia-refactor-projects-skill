@@ -1,6 +1,11 @@
+import os
 import sqlite3
 from werkzeug.security import generate_password_hash
 from config.settings import DATABASE_PATH
+
+SEED_ADMIN_PASS = os.environ.get("SEED_ADMIN_PASS", "admin-dev-only")
+SEED_USER1_PASS = os.environ.get("SEED_USER1_PASS", "user1-dev-only")
+SEED_USER2_PASS = os.environ.get("SEED_USER2_PASS", "user2-dev-only")
 
 _db_connection = None
 
@@ -81,9 +86,9 @@ def _seed_data(conn):
             produtos
         )
         usuarios = [
-            ("Admin", "admin@loja.com", generate_password_hash("admin123"), "admin"),
-            ("João Silva", "joao@email.com", generate_password_hash("123456"), "cliente"),
-            ("Maria Santos", "maria@email.com", generate_password_hash("senha123"), "cliente"),
+            ("Admin", "admin@loja.com", generate_password_hash(SEED_ADMIN_PASS), "admin"),
+            ("João Silva", "joao@email.com", generate_password_hash(SEED_USER1_PASS), "cliente"),
+            ("Maria Santos", "maria@email.com", generate_password_hash(SEED_USER2_PASS), "cliente"),
         ]
         cursor.executemany(
             "INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)",

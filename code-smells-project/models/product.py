@@ -1,17 +1,11 @@
 from config.database import get_db
+from utils.db_utils import row_to_dict
+
+_PRODUCT_FIELDS = ["id", "nome", "descricao", "preco", "estoque", "categoria", "ativo", "criado_em"]
 
 
 def _row_to_dict(row):
-    return {
-        "id": row["id"],
-        "nome": row["nome"],
-        "descricao": row["descricao"],
-        "preco": row["preco"],
-        "estoque": row["estoque"],
-        "categoria": row["categoria"],
-        "ativo": row["ativo"],
-        "criado_em": row["criado_em"]
-    }
+    return row_to_dict(row, _PRODUCT_FIELDS)
 
 
 def get_all_products():
@@ -78,3 +72,25 @@ def search_products(termo, categoria=None, preco_min=None, preco_max=None):
         params.append(preco_max)
     cursor.execute(query, params)
     return [_row_to_dict(row) for row in cursor.fetchall()]
+
+
+def get_product_for_order(produto_id):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT id, nome, preco, estoque FROM produtos WHERE id = ?",
+        (produto_id,)
+    )
+    row = cursor.fetchone()
+    if row:
+        return {"id": row["id"], "nome": row["nome"], "preco": row["preco"], "estoque": row["estoque"]}
+    return None
+
+
+def decrement_stock(produto_id, quantidade):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "UPDATE produtos SET estoque = estoque - ? WHERE id = ?",
+        (quantidade, produto_id)
+    )
