@@ -1044,5 +1044,649 @@ Todos os contratos de API preservados. Todos os endpoints funcionais validados.
 Boot sem erros. Integridade referencial confirmada via teste end-to-end.
 
 ================================
-END OF REPORT
-=============
+END OF REPORT — FIRST AUDIT CYCLE (2026-06-20)
+===============================================
+
+================================
+SECOND AUDIT CYCLE — 2026-06-22
+================================
+
+Context:
+Este segundo ciclo audita o mesmo projeto após a refatoração do primeiro ciclo.
+A arquitetura era MVC na entrada — o objetivo foi identificar violações residuais,
+resolver os 4 findings OPEN do primeiro ciclo e aplicar os padrões RP006 e RP007.
+
+================================
+PROJECT INFORMATION (2nd Cycle)
+================================
+
+Project Name:              ecommerce-api-legacy
+Analysis Date:             2026-06-22
+
+Language:                  JavaScript (Node.js v25.9.0)
+Framework:                 Express.js 4.18.2
+Database:                  SQLite 3 (in-memory :memory:)
+ORM:                       Nenhum (wrappers Promise sobre sqlite3)
+Package Manager:           npm
+
+Architecture (entrada):    MVC (14 arquivos de código-fonte)
+Architecture (saída):      MVC + middleware/ + utils/logger (17 arquivos)
+Domain:                    LMS / E-commerce (plataforma de checkout de cursos online)
+Confidence:                HIGH
+
+Source Files Analyzed:     14 arquivos (src/ completo pós-1º ciclo)
+Estimated Lines of Code:   ~200 LOC de produção
+
+Migration Strategy:        TARGETED (melhorias pontuais — sem reorganização estrutural)
+
+================================
+ENDPOINT INVENTORY (2nd Cycle)
+================================
+
+Endpoints Discovered: 3
+
+| Method | Route                         | Handler                              | Auth (antes) | Auth (depois) |
+| ------ | ----------------------------- | ------------------------------------ | ------------ | ------------- |
+| POST   | /api/checkout                 | CheckoutController.checkout          | Não          | Não           |
+| GET    | /api/admin/financial-report   | FinancialController.getFinancialReport | Não        | requireAdmin  |
+| DELETE | /api/users/:id                | UserController.deleteUser            | Não          | requireAdmin  |
+
+Protected Endpoints (antes):  0
+Protected Endpoints (depois):  2 (GET /api/admin/financial-report, DELETE /api/users/:id)
+
+================================
+AUDIT SUMMARY (2nd Cycle)
+==========================
+
+CRITICAL: 0
+HIGH:     4  (1 carry-over + 3 novos)
+MEDIUM:   3  (1 carry-over + 2 novos)
+LOW:      2  (2 carry-over)
+----------
+Total:    9 findings
+
+Migration Readiness (antes):  REQUIRES_REVIEW
+Migration Readiness (depois): COMPLETE
+
+================================
+HIGH FINDINGS (2nd Cycle)
+==========================
+
+## B-001
+
+Severity:
+HIGH
+
+ID: AP105
+
+Title:
+financial.service.js bypassa camada de models — acesso direto ao banco
+
+File:
+src/services/financial.service.js
+
+Lines:
+1
+
+Description:
+O service de relatório financeiro importava `query` diretamente de `../config/database`,
+executando a query LEFT JOIN sem passar por nenhuma camada de model. Não existia
+`financial.model.js`. Todos os outros services usavam models corretamente.
+
+Detection Evidence:
+```javascript
+const { query } = require('../config/database');  // linha 1 — bypass do model layer
+
+const getFinancialReport = async () => {
+  const rows = await query(`SELECT ... FROM courses LEFT JOIN enrollments ...`);
+```
+
+Impact:
+Viola o fluxo MVC: Route → Controller → Service → Model → Database.
+Lógica de persistência (query SQL com JOINs) na camada de service.
+Impossível mockar o banco em testes unitários do service.
+Coloca SQL de domínio (financial reporting) fora da camada de models onde pertence.
+
+Recommendation:
+Criar models/financial.model.js com getFinancialRows(); service importa o model.
+
+Suggested Refactoring Pattern: RP002 — Move Database Access
+
+Status:
+RESOLVED
+  — models/financial.model.js criado com getFinancialRows()
+  — services/financial.service.js: import config/database removido; chama financialModel.getFinancialRows()
+
+---
+
+## B-002
+
+Severity:
+HIGH
+
+ID: AP105
+
+Title:
+Gerenciamento de transação na camada de services — Layer Bypass em checkout e user
+
+Files:
+src/services/checkout.service.js (linhas 1, 33-44)
+src/services/user.service.js (linhas 1, 7-19)
+
+Description:
+Ambos os services importavam `{ run }` de `'../config/database'` para executar
+`BEGIN TRANSACTION`, `COMMIT` e `ROLLBACK` inline. O controle de transação é
+responsabilidade da camada de infraestrutura, não da camada de negócio.
+O padrão era duplicado em dois arquivos independentes.
+
+Detection Evidence:
+```javascript
+// checkout.service.js:1 e user.service.js:1
+const { run } = require('../config/database');
+
+// checkout.service.js:33-44
+await run('BEGIN TRANSACTION');
+try {
+  const enrollment = await enrollmentModel.create(user.id, c_id);
+  // ...
+  await run('COMMIT');
+} catch (err) {
+  await run('ROLLBACK');
+  throw err;
+}
+```
+
+Impact:
+Services conhecem detalhes do driver de banco (sqlite3 transaction API).
+Padrão BEGIN/COMMIT/ROLLBACK duplicado — qualquer mudança exige editar dois arquivos.
+Viola o princípio de responsabilidade única: services devem orquestrar regras de negócio,
+não gerenciar primitivas de banco de dados.
+
+Recommendation:
+Adicionar withTransaction(fn) helper em config/database.js; services chamam
+withTransaction(async () => { ... }) sem conhecer o controle de transação.
+
+Suggested Refactoring Pattern: RP002 — Move Database Access
+
+Status:
+RESOLVED
+  — config/database.js: withTransaction(fn) adicionado e exportado
+  — checkout.service.js: run import removido; bloco try/catch de transação substituído por withTransaction()
+  — user.service.js: run import removido; bloco try/catch de transação substituído por withTransaction()
+  — Padrão BEGIN TRANSACTION presente APENAS em config/database.js (verificado via grep)
+
+---
+
+## B-003
+
+Severity:
+HIGH
+
+ID: AP001 / RP006
+
+Title:
+Senha do usuário seed armazenada em plain text no código-fonte
+
+File:
+src/config/database.js
+
+Lines:
+33 (1º ciclo)
+
+Description:
+O usuário seed 'Leonan' era inserido com senha '123' em plain text diretamente
+no código-fonte. A função hashPassword() de utils/crypto.js (bcrypt) existia
+e era usada para novos usuários no checkout, mas não era aplicada ao seed.
+A credencial ficava visível no histórico do Git.
+
+Detection Evidence:
+```javascript
+await run("INSERT INTO users (name, email, pass) VALUES ('Leonan', 'leonan@fullcycle.com.br', '123')");
+//                                                                                              ^^^^^ plain text
+```
+
+Impact:
+Credencial exposta no repositório Git (permanece no histórico mesmo após remoção).
+Inconsistência crítica: novos usuários recebem hash bcrypt, mas o seed tem '123' em
+plain text. Qualquer tentativa de login de Leonan falharia porque
+bcrypt.compare('123', '123') retorna false (bcrypt não compara strings, compara hash).
+
+Recommendation:
+Importar hashPassword() em database.js; usar process.env.SEED_ADMIN_PASS com
+fallback marcado como dev-only. Seguir padrão RP006 (Secure Password Hashing).
+
+Suggested Refactoring Pattern: RP006 — Secure Password Hashing
+
+Status:
+RESOLVED
+  — database.js: importa hashPassword de '../utils/crypto'
+  — Seed usa: const seedPass = process.env.SEED_ADMIN_PASS || 'admin-dev-only-change-in-prod'
+  — Senha inserida como hash bcrypt via await hashPassword(seedPass)
+  — String literal '123' não aparece mais como valor de senha em database.js
+
+---
+
+## AP-H04 (carry-over)
+
+Severity:
+HIGH
+
+ID: AP002 / RP007
+
+Title:
+Endpoints admin e destrutivo sem autenticação ou autorização
+
+Files:
+src/routes/financial.routes.js (linha 5)
+src/routes/user.routes.js (linha 5)
+
+Description:
+CARRY-OVER DO 1º CICLO: GET /api/admin/financial-report (dados financeiros sensíveis)
+e DELETE /api/users/:id (operação irreversível) permaneciam sem nenhum middleware
+de autenticação. O finding foi deixado OPEN no 1º ciclo por estar fora do escopo
+da migração MVC.
+
+Detection Evidence:
+```javascript
+// financial.routes.js:5 — sem middleware de autenticação
+router.get('/admin/financial-report', getFinancialReport);
+
+// user.routes.js:5 — sem middleware de autenticação
+router.delete('/users/:id', deleteUser);
+```
+Grep por 'requireAuth', 'jwt', 'session', 'apiKey': zero ocorrências em toda a src/.
+
+Impact:
+Qualquer cliente HTTP sem autenticação: acessa dados financeiros de toda a plataforma;
+deleta qualquer usuário (incluindo dados relacionados via cascade). Viola OWASP A01:2021
+— Broken Access Control.
+
+Recommendation:
+Criar middleware/auth.js com requireAdmin validando header X-Admin-Token contra
+process.env.ADMIN_TOKEN. Aplicar nas rotas protegidas via RP007.
+
+Suggested Refactoring Pattern: RP007 — Remove or Protect Dangerous Endpoint
+
+Status:
+RESOLVED
+  — middleware/auth.js criado com requireAdmin + ADMIN_TOKEN via process.env
+  — Aviso emitido no boot se ADMIN_TOKEN não estiver configurado
+  — financial.routes.js: requireAdmin adicionado em GET /admin/financial-report
+  — user.routes.js: requireAdmin adicionado em DELETE /users/:id
+  — Validado: sem token → 401 {"error":"Unauthorized"}; com token correto → 200
+
+================================
+MEDIUM FINDINGS (2nd Cycle)
+============================
+
+## AP-M02 (carry-over)
+
+Severity:
+MEDIUM
+
+Title:
+Validação de cartão de crédito trivialmente insuficiente
+
+File:
+src/services/checkout.service.js
+
+Lines:
+24 (1º ciclo)
+
+Description:
+CARRY-OVER DO 1º CICLO: A validação de cartão usava card.startsWith('4'), aceita
+qualquer string começando com '4' — incluindo '4', '4abc', '4x'. O finding foi
+deixado OPEN no 1º ciclo com a nota "preparado para gateway real".
+
+Detection Evidence:
+```javascript
+const status = card.startsWith('4') ? 'PAID' : 'DENIED';
+```
+
+Impact:
+Regra de negócio crítica (processamento de pagamento) completamente ineficaz.
+Qualquer string arbitrária começando com '4' é aceita como pagamento válido.
+
+Recommendation:
+Implementar algoritmo de Luhn como validação mínima sem gateway externo.
+Nota: cartão de teste atual no api.http ('4111222233334444') NÃO passa no Luhn
+(soma = 66). Substituir por '4111111111111111' (soma = 30, padrão Visa de teste).
+
+Status:
+RESOLVED
+  — isValidCard() implementado com algoritmo de Luhn em checkout.service.js
+  — card.startsWith('4') removido; substituído por isValidCard(card)
+  — api.http atualizado: '4111222233334444' → '4111111111111111'
+  — Validado: 4111111111111111 → PAID (200); 5111222233334444 → DENIED (400)
+
+---
+
+## B-004
+
+Severity:
+MEDIUM
+
+ID: AP601
+
+Title:
+Null guard ausente em checkout.controller.js — TypeError quando req.body é undefined
+
+File:
+src/controllers/checkout.controller.js
+
+Lines:
+4
+
+Description:
+A desestruturação do body do request ocorria sem verificação prévia de req.body.
+Se a requisição chegasse sem Content-Type: application/json, o middleware
+express.json() não popularia req.body (fica undefined), e a desestruturação
+lançaria TypeError não tratado, resultando em resposta HTTP 500.
+
+Detection Evidence:
+```javascript
+const checkout = async (req, res) => {
+  const { usr, eml, pwd, c_id, card } = req.body;  // sem null guard — TypeError se req.body === undefined
+```
+
+Impact:
+Request sem Content-Type correto recebe resposta 500 (Internal Server Error) em vez de
+400 (Bad Request). Expõe stack trace interno dependendo da configuração do Express.
+Comportamento inesperado para clientes da API.
+
+Recommendation:
+Adicionar verificação de req.body antes da desestruturação:
+  if (!req.body || typeof req.body !== 'object') return res.status(400).send('Bad Request');
+
+Status:
+RESOLVED
+  — checkout.controller.js: null guard adicionado antes da desestruturação
+  — Validado: POST sem Content-Type → 400 'Bad Request' (antes: 500 TypeError)
+
+---
+
+## B-005
+
+Severity:
+MEDIUM
+
+ID: AP300
+
+Title:
+Schema da tabela users sem UNIQUE constraint no campo email
+
+File:
+src/config/database.js
+
+Lines:
+27
+
+Description:
+A tabela users era criada sem constraint de unicidade no campo email:
+  CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, pass TEXT)
+O fluxo de checkout faz findByEmail() + create() de forma não-atômica. Em condições
+de concorrência, dois requests simultâneos com o mesmo email poderiam criar dois
+usuários entre o SELECT e o INSERT.
+
+Detection Evidence:
+```javascript
+await run('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, pass TEXT)');
+//                                                                    ^^^^ sem UNIQUE
+```
+
+Impact:
+Usuários duplicados com o mesmo email são possíveis sob concorrência.
+O banco não oferece garantia atômica para a regra de negócio "um email = um usuário".
+Relatórios financeiros poderiam apresentar dados inconsistentes por usuários duplicados.
+
+Recommendation:
+Adicionar UNIQUE constraint: email TEXT UNIQUE.
+SQLite lançará SQLITE_CONSTRAINT se uma inserção duplicada for tentada, que será
+capturada pelo try/catch existente no checkout.service.js via withTransaction().
+
+Status:
+RESOLVED
+  — database.js: CREATE TABLE users agora inclui 'email TEXT UNIQUE'
+  — Inserção duplicada será rejeitada com SQLITE_CONSTRAINT (erro tratado pelo withTransaction)
+
+================================
+LOW FINDINGS (2nd Cycle)
+=========================
+
+## AP-L02 (carry-over)
+
+Severity:
+LOW
+
+Title:
+Logging sem estrutura, nível de severidade ou timestamp
+
+File:
+src/services/checkout.service.js
+
+Lines:
+31, 39 (1º ciclo)
+
+Description:
+CARRY-OVER DO 1º CICLO: console.log simples sem nível de severidade,
+timestamp estruturado ou correlação de request. O finding foi deixado
+OPEN no 1º ciclo.
+
+Detection Evidence:
+```javascript
+console.log(`[LOG] Processando pagamento para checkout do curso ${c_id}`);
+console.log(`[LOG] Checkout concluído: ${course.title} para usuário ${user.id}`);
+```
+
+Recommendation:
+Criar utils/logger.js com output JSON estruturado (timestamp ISO + level).
+
+Status:
+RESOLVED
+  — utils/logger.js criado com logger.info(), logger.warn(), logger.error()
+  — Output: JSON com campos timestamp (ISO 8601), level, message
+  — checkout.service.js: console.log substituído por logger.info()
+  — Saída observada: {"timestamp":"2026-06-23T00:04:43.037Z","level":"INFO","message":"..."}
+
+---
+
+## AP-L01 (carry-over)
+
+Severity:
+LOW
+
+Title:
+Nomes de campos de request body abreviados e não descritivos
+
+File:
+src/controllers/checkout.controller.js
+
+Lines:
+4
+
+Description:
+CARRY-OVER DO 1º CICLO: Campos usr, eml, pwd, c_id no body de POST /api/checkout.
+
+Status:
+OPEN / DEFERRED
+  — Contrato de API preservado intencionalmente para compatibilidade retroativa.
+  — Recomendado para versionamento futuro da API (v2).
+  — Nenhuma mudança de código neste ciclo.
+
+================================
+DEPRECATED APIS (2nd Cycle)
+============================
+
+Nenhuma API deprecated detectada.
+
+Verificado:
+  — require('sqlite3').verbose(): API válida em sqlite3 v5.1.6
+  — bcrypt.hash(): API corrente em bcrypt v6.0.0
+  — express.json(): API corrente em Express 4.18.2
+  — dotenv.config(): API corrente em dotenv v17.4.2
+  — Nenhum import de módulo Node.js deprecated (sys, url legado, etc.)
+
+================================
+RP PATTERN EVALUATION (2nd Cycle)
+===================================
+
+| Padrão | Aplicável | Status   | Evidência                                                      |
+|--------|-----------|----------|----------------------------------------------------------------|
+| RP006  | SIM       | RESOLVED | database.js seed usa hashPassword(process.env.SEED_ADMIN_PASS) |
+| RP007  | SIM       | RESOLVED | middleware/auth.js + requireAdmin em 2 rotas admin/destrutivas |
+| RP008  | NÃO       | N/A      | Nenhuma API depreciada detectada (Express 4.18.2, sqlite3 5.1.6, bcrypt 6.0.0) |
+
+================================
+NEW STRUCTURE (after 2nd Cycle)
+================================
+
+```
+src/
+├── app.js                               (inalterado)
+├── config/
+│   └── database.js                      (modificado: email UNIQUE, bcrypt seed, +withTransaction)
+├── controllers/
+│   ├── checkout.controller.js           (modificado: +null guard req.body)
+│   ├── financial.controller.js          (inalterado)
+│   └── user.controller.js               (inalterado)
+├── middleware/                          ← NOVO diretório
+│   └── auth.js                          ← NOVO: requireAdmin + ADMIN_TOKEN via env (AP-H04)
+├── models/
+│   ├── auditLog.model.js                (inalterado)
+│   ├── course.model.js                  (inalterado)
+│   ├── enrollment.model.js              (inalterado)
+│   ├── financial.model.js               ← NOVO: getFinancialRows() com JOIN query (B-001)
+│   ├── payment.model.js                 (inalterado)
+│   └── user.model.js                    (inalterado)
+├── routes/
+│   ├── checkout.routes.js               (inalterado)
+│   ├── financial.routes.js              (modificado: +requireAdmin em /admin/financial-report)
+│   └── user.routes.js                   (modificado: +requireAdmin em DELETE /users/:id)
+├── services/
+│   ├── checkout.service.js              (modificado: -run import, +withTransaction, +isValidCard Luhn, +logger)
+│   ├── financial.service.js             (modificado: -query import, +financialModel)
+│   └── user.service.js                  (modificado: -run import, +withTransaction)
+└── utils/
+    ├── crypto.js                        (inalterado)
+    └── logger.js                        ← NOVO: log estruturado JSON com timestamp ISO (AP-L02)
+```
+
+Dependency Flow (achieved):
+```
+HTTP Request
+     │
+     ▼
+  Routes (Express Router)
+     │
+     ▼
+Middleware (requireAdmin — para rotas protegidas)
+     │
+     ▼
+Controllers (orquestração HTTP — thin layer)
+     │
+     ▼
+  Services (regras de negócio: checkout, financial, user)
+     │
+     ▼
+   Models (persistência SQL por entidade + financial.model)
+     │
+     ▼
+config/database.js (wrappers Promise + withTransaction)
+     │
+     ▼
+  SQLite3 (in-memory)
+```
+
+================================
+VALIDATION RESULTS (2nd Cycle)
+================================
+
+Application Boot:             PASS
+  — node src/app.js sem erros de import
+  — "Frankenstein LMS rodando na porta 3000..." observado
+  — initDb() completa sem erros (UNIQUE constraint, bcrypt seed, withTransaction)
+  — Aviso emitido quando ADMIN_TOKEN ausente (não causa crash)
+
+Endpoint Validation:          PASS  (9/9 verificações)
+  — POST /api/checkout, card=4111111111111111 (Luhn válido)  → 200 {"msg":"Sucesso","enrollment_id":2}
+  — POST /api/checkout, card=5111222233334444 (Luhn inválido) → 400 "Pagamento recusado"
+  — POST /api/checkout, sem Content-Type                      → 400 "Bad Request" (antes: 500)
+  — POST /api/checkout, campos faltando                       → 400 "Bad Request"
+  — GET  /api/admin/financial-report sem X-Admin-Token        → 401 {"error":"Unauthorized"}
+  — GET  /api/admin/financial-report com X-Admin-Token        → 200 [{...cursos e receitas...}]
+  — DELETE /api/users/1 sem X-Admin-Token                     → 401 {"error":"Unauthorized"}
+  — DELETE /api/users/1 com X-Admin-Token                     → 200 "Usuário deletado com sucesso."
+  — GET  /api/admin/financial-report pós-delete               → 200 revenue=0 (cascade validado)
+
+Architecture Validation:      PASS  (14/14 verificações de grep)
+  — financial.service.js: SEM require('../config/database')
+  — checkout.service.js: SEM 'BEGIN TRANSACTION' inline
+  — user.service.js: SEM 'BEGIN TRANSACTION' inline
+  — 'BEGIN TRANSACTION' APENAS em config/database.js (dentro de withTransaction)
+  — requireAdmin: presente em financial.routes.js e user.routes.js
+  — models/financial.model.js: criado com getFinancialRows()
+  — middleware/auth.js: criado com requireAdmin
+  — utils/logger.js: criado
+  — Fluxo Route → Middleware → Controller → Service → Model respeitado
+
+Security Validation:          PASS
+  — Senha '123' ausente como literal em database.js (substituída por bcrypt hash)
+  — ADMIN_TOKEN lido de process.env em middleware/auth.js
+  — email TEXT UNIQUE presente no CREATE TABLE users
+
+Logging Validation:           PASS
+  — console.log substituído por logger.info() em checkout.service.js
+  — Output JSON estruturado com timestamp ISO observado durante testes
+
+RP Pattern Validation:        PASS
+  — RP006: RESOLVED (hashPassword aplicado no seed via SEED_ADMIN_PASS env var)
+  — RP007: RESOLVED (middleware/auth.js + requireAdmin em 2 rotas protegidas)
+  — RP008: N/A (nenhuma API depreciada encontrada)
+
+================================
+REFACTORING CHECKLIST (2nd Cycle)
+===================================
+
+[x] B-001 (AP105 HIGH):   financial.service.js Layer Bypass — financial.model.js criado
+[x] B-002 (AP105 HIGH):   Transaction management em services — withTransaction helper em config/database.js
+[x] B-003 (AP001 HIGH):   Seed password plain text (RP006) — bcrypt + SEED_ADMIN_PASS env var
+[x] AP-H04 (AP002 HIGH):  Sem autenticação endpoints admin (RP007) — middleware/auth.js + requireAdmin
+[x] AP-M02 (MEDIUM):      Validação cartão trivial — algoritmo de Luhn em isValidCard()
+[x] B-004 (AP601 MEDIUM): Null guard ausente em checkout.controller.js — verificação adicionada
+[x] B-005 (AP300 MEDIUM): UNIQUE constraint ausente — email TEXT UNIQUE no schema
+[x] AP-L02 (LOW):         console.log sem estrutura — utils/logger.js com JSON estruturado
+[ ] AP-L01 (LOW):         Campos abreviados no body — OPEN/DEFERRED para API v2
+
+================================
+FINAL STATUS (2nd Cycle)
+=========================
+
+Findings Open:      1
+  AP-L01 LOW  Campos de request body abreviados (DEFERRED — versionamento API v2)
+
+Findings Resolved:  8
+  B-001  HIGH   financial.service.js Layer Bypass
+  B-002  HIGH   Transaction management em services (checkout + user)
+  B-003  HIGH   Seed password em plain text (RP006)
+  AP-H04 HIGH   Endpoints sem autenticação (RP007)
+  AP-M02 MEDIUM Validação de cartão trivial (Luhn)
+  B-004  MEDIUM Null guard ausente em checkout.controller.js
+  B-005  MEDIUM UNIQUE constraint ausente em users.email
+  AP-L02 LOW    console.log sem estrutura (logger.js)
+
+Overall Status:
+PASS
+
+================================
+CUMULATIVE PROJECT STATUS
+==========================
+
+| Ciclo | Data       | Arquitetura Entrada    | Arquitetura Saída              | Findings | Status |
+|-------|------------|------------------------|-------------------------------|----------|--------|
+| 1º    | 2026-06-20 | MONOLITHIC (3 arq)     | MVC (14 arq)                  | 15       | PASS   |
+| 2º    | 2026-06-22 | MVC (14 arq)           | MVC+middleware+logger (17 arq) | 9       | PASS   |
+| Total |            |                        |                               | 24       | PASS   |
+
+================================
+END OF REPORT — SECOND AUDIT CYCLE (2026-06-22)
+================================================

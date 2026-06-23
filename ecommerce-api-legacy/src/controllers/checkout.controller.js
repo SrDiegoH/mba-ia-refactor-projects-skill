@@ -1,6 +1,10 @@
 const checkoutService = require('../services/checkout.service');
 
 const checkout = async (req, res) => {
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).send('Bad Request');
+  }
+
   const { usr, eml, pwd, c_id, card } = req.body;
 
   if (!usr || !eml || !c_id || !card) {

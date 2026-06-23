@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:3000
+@adminToken = your-admin-token-here
 
 ### Checkout - sucesso
 POST {{baseUrl}}/api/checkout
@@ -9,7 +10,7 @@ Content-Type: application/json
   "eml": "gui@fullcycle.com.br",
   "pwd": "senhaforte",
   "c_id": 2,
-  "card": "4111222233334444"
+  "card": "4111111111111111"
 }
 
 ### Checkout - pagamento recusado
@@ -26,6 +27,8 @@ Content-Type: application/json
 
 ### Relatório financeiro administrativo
 GET {{baseUrl}}/api/admin/financial-report
+X-Admin-Token: {{adminToken}}
 
 ### Deletar usuário
 DELETE {{baseUrl}}/api/users/1
+X-Admin-Token: {{adminToken}}
