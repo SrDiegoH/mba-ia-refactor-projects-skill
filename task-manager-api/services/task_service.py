@@ -5,6 +5,9 @@ from models.category import Category
 from sqlalchemy.orm import joinedload
 from datetime import datetime
 from utils.helpers import VALID_STATUSES, MIN_TITLE_LENGTH, MAX_TITLE_LENGTH, DEFAULT_PRIORITY
+from services.notification_service import NotificationService
+
+_notifier = NotificationService()
 
 class TaskService:
 
@@ -56,9 +59,11 @@ class TaskService:
         done = Task.query.filter_by(status='done').count()
         cancelled = Task.query.filter_by(status='cancelled').count()
 
-        overdue_count = sum(
-            1 for t in Task.query.all() if t.is_overdue()
-        )
+        overdue_count = Task.query.filter(
+            Task.due_date < datetime.utcnow(),
+            Task.status.notin_(['done', 'cancelled']),
+            Task.due_date.isnot(None)
+        ).count()
 
         return {
             'total': total,
@@ -88,8 +93,11 @@ class TaskService:
             return None, 'Prioridade deve ser entre 1 e 5'
 
         user_id = data.get('user_id')
-        if user_id and not db.session.get(User, user_id):
-            return None, 'Usuário não encontrado'
+        user_obj = None
+        if user_id:
+            user_obj = db.session.get(User, user_id)
+            if not user_obj:
+                return None, 'Usuário não encontrado'
 
         category_id = data.get('category_id')
         if category_id and not db.session.get(Category, category_id):
@@ -117,6 +125,11 @@ class TaskService:
         try:
             db.session.add(task)
             db.session.commit()
+            if user_obj:
+                try:
+                    _notifier.notify_task_assigned(user_obj, task)
+                except Exception:
+                    pass
             return task.to_dict(), None
         except Exception as e:
             db.session.rollback()

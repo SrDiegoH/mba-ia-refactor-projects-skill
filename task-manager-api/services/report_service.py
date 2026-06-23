@@ -2,8 +2,10 @@ from database import db
 from models.task import Task
 from models.user import User
 from models.category import Category
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta
-from utils.helpers import calculate_percentage
+from utils.helpers import calculate_percentage, is_valid_color
 
 class ReportService:
 
@@ -17,15 +19,21 @@ class ReportService:
         done = Task.query.filter_by(status='done').count()
         cancelled = Task.query.filter_by(status='cancelled').count()
 
-        overdue_list = []
-        for t in Task.query.all():
-            if t.is_overdue():
-                overdue_list.append({
-                    'id': t.id,
-                    'title': t.title,
-                    'due_date': str(t.due_date),
-                    'days_overdue': (datetime.utcnow() - t.due_date).days
-                })
+        now = datetime.utcnow()
+        overdue_tasks = Task.query.filter(
+            Task.due_date < now,
+            Task.status.notin_(['done', 'cancelled']),
+            Task.due_date.isnot(None)
+        ).all()
+        overdue_list = [
+            {
+                'id': t.id,
+                'title': t.title,
+                'due_date': str(t.due_date),
+                'days_overdue': (now - t.due_date).days
+            }
+            for t in overdue_tasks
+        ]
 
         seven_days_ago = datetime.utcnow() - timedelta(days=7)
         recent_tasks = Task.query.filter(Task.created_at >= seven_days_ago).count()
@@ -35,10 +43,9 @@ class ReportService:
         ).count()
 
         user_stats = []
-        for u in User.query.all():
-            user_tasks = Task.query.filter_by(user_id=u.id).all()
-            total = len(user_tasks)
-            completed = sum(1 for t in user_tasks if t.status == 'done')
+        for u in User.query.options(joinedload(User.tasks)).all():
+            total = len(u.tasks)
+            completed = sum(1 for t in u.tasks if t.status == 'done')
             user_stats.append({
                 'user_id': u.id,
                 'user_name': u.name,
@@ -122,11 +129,16 @@ class ReportService:
         }, None
 
     def get_categories(self):
+        task_counts = dict(
+            db.session.query(Task.category_id, func.count(Task.id))
+            .group_by(Task.category_id)
+            .all()
+        )
         categories = Category.query.all()
         result = []
         for c in categories:
             cat_data = c.to_dict()
-            cat_data['task_count'] = Task.query.filter_by(category_id=c.id).count()
+            cat_data['task_count'] = task_counts.get(c.id, 0)
             result.append(cat_data)
         return result, None
 
@@ -135,10 +147,14 @@ class ReportService:
         if not name:
             return None, 'Nome é obrigatório'
 
+        color = data.get('color', '#000000')
+        if not is_valid_color(color):
+            return None, 'Cor inválida. Use formato #RRGGBB'
+
         category = Category()
         category.name = name
         category.description = data.get('description', '')
-        category.color = data.get('color', '#000000')
+        category.color = color
 
         try:
             db.session.add(category)

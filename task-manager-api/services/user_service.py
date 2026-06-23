@@ -1,12 +1,13 @@
 from database import db
 from models.user import User
 from models.task import Task
+from sqlalchemy.orm import joinedload
 from utils.helpers import validate_email, VALID_ROLES, MIN_PASSWORD_LENGTH
 
 class UserService:
 
     def get_all_users(self):
-        users = User.query.all()
+        users = User.query.options(joinedload(User.tasks)).all()
         result = []
         for u in users:
             user_data = u.to_dict()

@@ -19,8 +19,7 @@ class NotificationService:
             server.sendmail(self.email_user, to, message)
             server.quit()
             return True
-        except Exception as e:
-            print(f"Erro ao enviar email: {str(e)}")
+        except Exception:
             return False
 
     def notify_task_assigned(self, user, task):
