@@ -454,7 +454,95 @@ A skill deve atingir os seguintes mínimos em **todos os 3 projetos**:
 
 ## Análise Manual
 
-As análises iniciais dos projetos se encontram em `mba-ia-refactor-projects-skill\reports\analise-inicial`
+### Projeto 1 — code-smells-project (Python/Flask E-commerce)
+
+**Informações Gerais**
+
+- Linguagem: Python
+- Framework: Flask
+- Banco de Dados: SQLite
+- Arquitetura Atual: Monolítica
+- Domínio: E-commerce
+
+**Resumo**
+
+O projeto concentra praticamente toda a lógica da aplicação em poucos arquivos (`app.py`, `controllers.py`, `models.py` e `database.py`), apresentando graves problemas de segurança, separação de responsabilidades e manutenção.
+
+| Severidade | Finding | Arquivo | Justificativa |
+|:----------:|---------|---------|---------------|
+| CRITICAL | Credenciais Hardcoded | `app.py` | `SECRET_KEY` em código-fonte expõe sessões e credenciais diretamente no repositório |
+| CRITICAL | Execução Arbitrária de SQL | `app.py` (POST /admin/query) | Executa qualquer SQL recebido do usuário — leitura, alteração ou exclusão total do banco |
+| CRITICAL | SQL Injection | `models.py` | Consultas montadas por concatenação de strings permitem acesso indevido a qualquer dado |
+| HIGH | Senhas em Texto Puro | `database.py`, `models.py` | Senhas armazenadas sem hash expõem todas as credenciais em caso de vazamento do banco |
+| HIGH | Endpoint Administrativo Sem Autenticação | `app.py` (POST /admin/reset-db) | Qualquer usuário anônimo pode apagar todos os dados da aplicação |
+| HIGH | God Class / God Module | `models.py` | Um único módulo concentra banco, autenticação, pedidos, usuários, produtos e relatórios — impossível testar em isolamento |
+| MEDIUM | Regras de Negócio em Controllers | `controllers.py` | Validações e regras de domínio nas rotas dificultam reutilização e testes |
+| MEDIUM | N+1 Queries | `models.py` | Consultas dentro de loops causam degradação de performance proporcional ao volume de dados |
+| LOW | Logging com print() | Geral | `print()` não oferece níveis, formatação ou destino configurável |
+| LOW | Strings Mágicas | Geral | Valores fixos repetidos aumentam custo de manutenção e risco de inconsistência |
+
+**Resumo Final:** CRITICAL: 3 · HIGH: 3 · MEDIUM: 2 · LOW: 2 · **Total: 10 findings**
+
+---
+
+### Projeto 2 — ecommerce-api-legacy (Node.js/Express LMS)
+
+**Informações Gerais**
+
+- Linguagem: JavaScript
+- Framework: Express
+- Banco de Dados: SQLite (em memória)
+- Arquitetura Atual: Monolítica
+- Domínio: LMS / Plataforma de Cursos
+
+**Resumo**
+
+O projeto apresenta forte acoplamento dentro da classe `AppManager`, que mistura responsabilidades de pagamento, usuários, cursos, auditoria e persistência, além de problemas relevantes de segurança.
+
+| Severidade | Finding | Arquivo | Justificativa |
+|:----------:|---------|---------|---------------|
+| CRITICAL | Credenciais Hardcoded | `utils.js` | Configurações sensíveis e chaves diretamente no código-fonte expõem segredos no repositório |
+| CRITICAL | Criptografia Insegura | `utils.js`, `AppManager.js` | `badCrypto()` para senhas é reversível — qualquer acesso ao banco compromete todas as credenciais |
+| HIGH | God Class | `AppManager.js` | A mesma classe gerencia usuários, cursos, matrículas, pagamentos, auditoria, banco e rotas — violação completa de SRP |
+| HIGH | Lógica de Negócio Dentro das Rotas | `AppManager.js` | Checkout, matrícula e auditoria no handler HTTP — violação direta de MVC e SOLID |
+| HIGH | Dados Sensíveis em Logs | `AppManager.js` | Cartões e informações de pagamento em `console.log` criam risco de vazamento em produção |
+| MEDIUM | Banco em Memória | `AppManager.js` | `:memory:` causa perda total dos dados a cada reinicialização — inviável em produção |
+| MEDIUM | Ausência de Camada de Serviços | Geral | Toda regra de negócio acoplada às rotas impossibilita reutilização e testes unitários |
+| LOW | Convenções Inconsistentes | Geral | Nomes como `usr`, `eml`, `pwd`, `c_id` reduzem legibilidade e aumentam custo de manutenção |
+| LOW | Logging Não Estruturado | Geral | `console.log` sem níveis dificulta monitoramento e rastreamento de erros em produção |
+
+**Resumo Final:** CRITICAL: 2 · HIGH: 3 · MEDIUM: 2 · LOW: 2 · **Total: 9 findings**
+
+---
+
+### Projeto 3 — task-manager-api (Python/Flask Task Manager)
+
+**Informações Gerais**
+
+- Linguagem: Python
+- Framework: Flask
+- Banco de Dados: SQLAlchemy (SQLite)
+- Arquitetura Atual: Parcialmente Organizada
+- Domínio: Task Manager
+
+**Resumo**
+
+O projeto apresenta estrutura melhor que os demais (models/, routes/, services/), mas ainda há forte concentração de regras de negócio nas rotas e problemas de qualidade arquitetural relevantes.
+
+| Severidade | Finding | Arquivo | Justificativa |
+|:----------:|---------|---------|---------------|
+| HIGH | Regras de Negócio nas Rotas | `routes/task_routes.py` | Validações, cálculos, verificações de status e regras de atraso nas rotas violam separação de responsabilidades |
+| HIGH | N+1 Queries | `routes/task_routes.py` | Para cada task, consultas adicionais para usuário e categoria — degradação de performance proporcional ao volume |
+| MEDIUM | Tratamento Genérico de Exceções | `routes/task_routes.py` | `except:` nulo oculta erros reais e dificulta diagnóstico e rastreamento de falhas |
+| MEDIUM | Duplicação de Regras de Overdue | `routes/task_routes.py` | Lógica de overdue repetida em múltiplos endpoints viola DRY e cria risco de inconsistência |
+| MEDIUM | Serialização Manual | `routes/task_routes.py` | Montagem manual de dicionários para resposta em todos os endpoints — código repetitivo e frágil |
+| LOW | Imports Não Utilizados | `routes/task_routes.py` | Dependências desnecessárias aumentam acoplamento e ruído no código |
+| LOW | Strings Mágicas | `routes/task_routes.py` | Status como `"pending"`, `"in_progress"`, `"done"`, `"cancelled"` espalhados tornam manutenção mais custosa |
+| LOW | Validações Repetidas | `routes/task_routes.py` | Validações distribuídas em múltiplos endpoints duplicam lógica e criam pontos cegos |
+
+**Resumo Final:** HIGH: 2 · MEDIUM: 3 · LOW: 3 · **Total: 8 findings**
+
+> **Observação:** Este é o projeto mais próximo de uma arquitetura organizada. A refatoração necessária é significativamente menor que nos outros dois projetos — estratégia incremental em vez de reescrita.
 
 ## Construção da Skill
 
